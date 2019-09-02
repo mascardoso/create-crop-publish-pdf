@@ -190,6 +190,21 @@ async function delTmpFolder() {
   }
 }
 
+//rename original files or folders and remove spaces
+async function renameFilesFolders() {
+  await readdirAsync(filesFolder).then(async files => {
+    for (const file of files) {
+      fs.rename(
+        `${filesFolder}/${file}`,
+        `${filesFolder}/${file.split(" ").join("-")}`,
+        err => {
+          if (err) throw err;
+        }
+      );
+    }
+  });
+}
+
 //unzip / unrar archives to pdfs
 async function extractArchives(data) {
   const { stdout, stderr } = await exec(
@@ -268,6 +283,7 @@ async function promptUser() {
 
 //start
 async function start() {
+  await renameFilesFolders();
   await delTmpFolder();
   await promptUser();
   await createTmpFolder();

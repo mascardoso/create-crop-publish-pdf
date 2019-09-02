@@ -208,7 +208,7 @@ async function renameFilesFolders() {
 //unzip / unrar archives to pdfs
 async function extractArchives(data) {
   const { stdout, stderr } = await exec(
-    `unrar e ${filesFolder}/${data.extract} ${tmpFolder}`
+    `unrar e ${filesFolder}/${data.extract} ${tmpFolder} -idq`
   );
 
   if (stderr) {

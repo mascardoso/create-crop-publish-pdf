@@ -5,6 +5,9 @@ import PDFDocument from "pdfkit";
 import PDF2Pic from "pdf2pic";
 import child_process from "child_process";
 import inquirer from "inquirer";
+import del from "del";
+import _cliProgress from "cli-progress";
+const _colors = require("colors");
 
 const docPDF = new PDFDocument({ autoFirstPage: false }); // dont create a empty first page
 const readdirAsync = promisify(fs.readdir); // promisify node readdir
@@ -12,26 +15,32 @@ const exec = promisify(child_process.exec); // promisify exec
 const filesFolder = `${__dirname}/files`;
 const croppedFolder = `${__dirname}/files/tmp/cropped`;
 const tmpFolder = `${__dirname}/files/tmp`;
-const IMG_WIDTH = 2657;
-const IMG_HEIGHT = 4016;
-const REGEX_PAGES = /(\d-+\d+\d)/;
+const IMG_WIDTH = 5308;
+const IMG_HEIGHT = 4011;
+const REGEX_PAGES = /(\d{1,2}-+\d{1,2})/;
 let answersData = {}; // will contain all the answers from inquirer
 
 // use sharp to crop image
 // side can be left or right
-async function cropImage(filePath, fileName, side) {
+async function cropImage(
+  filePath,
+  fileName,
+  side,
+  cropPNGsBar,
+  currentFileIndex
+) {
   let outputImage = `${croppedFolder}/${fileName}.png`;
-
   await sharp(filePath)
     .extract({
-      width: IMG_WIDTH,
+      width: IMG_WIDTH / 2,
       height: IMG_HEIGHT,
-      left: side === "left" ? 0 : IMG_WIDTH,
+      left: side === "left" ? 0 : IMG_WIDTH / 2,
       top: 0
     })
     .toFile(outputImage)
     .then(data => {
-      console.log(`Cropped to ${side} and saved as ${fileName}.png`);
+      // console.log(`Cropped to ${side} and saved as ${fileName}.png`);
+      cropPNGsBar.update(currentFileIndex + 1);
     })
     .catch(err => {
       console.log("An error occured", err);
@@ -40,12 +49,18 @@ async function cropImage(filePath, fileName, side) {
 
 //create Cropped PNG's
 async function createCroppedPNGs() {
-  await readdirAsync(filesFolder).then(async files => {
+  const cropPNGsBar = new _cliProgress.SingleBar({
+    format: `Cropping PNGs | ${_colors.yellow(
+      "{bar}"
+    )} | {percentage}% || {value} of {total} pngs`
+  });
+  await readdirAsync(tmpFolder).then(async files => {
+    cropPNGsBar.start(files.length, 0);
     for (const file of files) {
       //check if is a PNG
       if (file.includes(".png")) {
         //save file path
-        const filePath = `${filesFolder}/${file}`;
+        const filePath = `${tmpFolder}/${file}`;
         //extract page numbers from filename
         const filePages = file.match(REGEX_PAGES).slice(1);
         //split the numbers on a array
@@ -66,31 +81,47 @@ async function createCroppedPNGs() {
         //check if cropped folder exists or not
         try {
           if (!fs.existsSync(croppedFolder)) {
-            console.log("Creating Cropped Folder...");
             fs.mkdirSync(croppedFolder);
           }
         } catch (err) {
           console.error(err);
         }
 
+        //get index of current file being processed
+        const currentFileIndex = files.indexOf(file);
+
         //crop pngs
-        await cropImage(filePath, fileLeftNumber, "left");
-        await cropImage(filePath, fileRightNumber, "right");
-      } else {
-        console.log("not a PNG!");
+        await cropImage(
+          filePath,
+          fileLeftNumber,
+          "left",
+          cropPNGsBar,
+          currentFileIndex
+        );
+        await cropImage(
+          filePath,
+          fileRightNumber,
+          "right",
+          cropPNGsBar,
+          currentFileIndex
+        );
       }
     }
   });
+  cropPNGsBar.stop();
 }
 
 //Write output to single PDF
 async function createPDF() {
   //create pdf write stream
-  const writeStream = fs.createWriteStream(`${filesFolder}/output.pdf`);
+  const writeStream = fs.createWriteStream(
+    `${filesFolder}/${answersData.title}.pdf`
+  );
   docPDF.pipe(writeStream);
   //add the images into the pdf
   await readdirAsync(croppedFolder).then(async files => {
-    for (const file of files) {
+    const pngFiles = files.filter(file => file.includes("png"));
+    for (const file of pngFiles) {
       const image = docPDF.openImage(`${croppedFolder}/${file}`);
       docPDF.addPage({ size: [image.width, image.height] });
       docPDF.image(image, 0, 0);
@@ -99,14 +130,19 @@ async function createPDF() {
   //finish
   docPDF.end();
   await writeStream.on("finish", () => {
-    console.log("PDF Generated!");
+    console.log("PDF Generated!", "\n");
   });
 }
 
 //Create PNGs from PDF
 async function createPNGsFromPDF() {
-  console.log("creating pngs from provided pdfs!");
+  const createPNGsBar = new _cliProgress.SingleBar({
+    format: `Creating PNGs from PDFs | ${_colors.yellow(
+      "{bar}"
+    )} | {percentage}% || {value} of {total} pdfs`
+  });
   await readdirAsync(tmpFolder).then(async files => {
+    createPNGsBar.start(files.length, 0);
     for (const file of files) {
       const newFileName = file.replace(".pdf", "");
       const pdf2pic = new PDF2Pic({
@@ -118,7 +154,7 @@ async function createPNGsFromPDF() {
       });
 
       file.includes("pdf") &&
-        pdf2pic.convert(`${tmpFolder}/${file}`).then(resolve => {
+        (await pdf2pic.convert(`${tmpFolder}/${file}`).then(() => {
           //fixes a bug from pdf2pic
           fs.rename(
             `${tmpFolder}/${newFileName}_1.png`,
@@ -127,19 +163,31 @@ async function createPNGsFromPDF() {
               if (err) throw err;
             }
           );
-          console.log(`created: ${tmpFolder}/${newFileName}.png`);
-          return resolve;
-        });
+          createPNGsBar.update(files.indexOf(file) + 1);
+        }));
     }
   });
+  createPNGsBar.stop();
 }
 
 //create Temporary folder for all file manipulation
 async function createTmpFolder() {
   return fs.mkdir(tmpFolder, { recursive: true }, err => {
     if (err) throw err;
-    console.log("created tmp folder");
+    console.log("Created temp folder", "\n");
   });
+}
+
+//delete Temporary folder for all file manipulation
+async function delTmpFolder() {
+  try {
+    if (fs.existsSync(tmpFolder)) {
+      console.log("Deleting Temp Folder...", "\n");
+      await del([tmpFolder]);
+    }
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 //unzip / unrar archives to pdfs
@@ -152,6 +200,18 @@ async function extractArchives(data) {
     console.error(`error: ${stderr}`);
   }
   console.log(`${stdout}`);
+}
+
+//copy pdf files from folder
+async function copyPDFFilesFromFolder(data) {
+  const { stdout, stderr } = await exec(
+    `cp -R ${filesFolder}/${data.extract}/. ${tmpFolder}`
+  );
+
+  if (stderr) {
+    console.error(`error: ${stderr}`);
+  }
+  console.log(`Finished copying pdfs into files folder. ${stdout}`);
 }
 
 //prompt user for choices
@@ -208,12 +268,16 @@ async function promptUser() {
 
 //start
 async function start() {
+  await delTmpFolder();
   await promptUser();
   await createTmpFolder();
-  answersData.isArchive && (await extractArchives(answersData));
+  answersData.isArchive
+    ? await extractArchives(answersData)
+    : await copyPDFFilesFromFolder(answersData);
   await createPNGsFromPDF();
-  // await createCroppedPNGs();
-  // await createPDF();
+  await createCroppedPNGs();
+  await createPDF();
+  await delTmpFolder();
 }
 
 start();

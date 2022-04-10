@@ -2,3 +2,4 @@ node_modules
 tmp
 files
 dist
+.DS_Store

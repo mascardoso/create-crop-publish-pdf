@@ -10,3 +10,5 @@ to support picture manipulation
 
 `brew install rar`
 to support unrar features. remember to allow the app to run on the privacy macos settings.
+
+Enjoy

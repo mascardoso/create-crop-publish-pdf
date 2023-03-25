@@ -9,7 +9,6 @@ import del from "del";
 import _cliProgress from "cli-progress";
 import _colors from "colors";
 
-const docPDF = new PDFDocument({ autoFirstPage: false }); // dont create a empty first page
 const readdirAsync = promisify(fs.readdir); // promisify node readdir
 const exec = promisify(child_process.exec); // promisify exec
 const filesFolder = `${__dirname}/files`;
@@ -37,13 +36,13 @@ async function cropImage(
       width: IMG_WIDTH / 2,
       height: IMG_HEIGHT,
       left: side === "left" ? 0 : IMG_WIDTH / 2,
-      top: 0
+      top: 0,
     })
     .toFile(outputImage)
-    .then(data => {
+    .then((data) => {
       cropImgBar.update(currentFileIndex + 1);
     })
-    .catch(err => {
+    .catch((err) => {
       console.log("An error occured", err);
     });
 }
@@ -53,9 +52,9 @@ async function createCroppedImages() {
   const cropImgBar = new _cliProgress.SingleBar({
     format: `Cropping ${IMG_FORMAT}s | ${_colors.yellow(
       "{bar}"
-    )} | {percentage}% || {value} of {total} ${IMG_FORMAT}s`
+    )} | {percentage}% || {value} of {total} ${IMG_FORMAT}s`,
   });
-  await readdirAsync(tmpFolder).then(async files => {
+  await readdirAsync(tmpFolder).then(async (files) => {
     cropImgBar.start(files.length, 0);
     for (const file of files) {
       //check if is a image
@@ -114,14 +113,15 @@ async function createCroppedImages() {
 
 //Write output to single PDF
 async function createPDF() {
+  const docPDF = new PDFDocument({ autoFirstPage: false }); // dont create a empty first page
   //create pdf write stream
   const writeStream = fs.createWriteStream(
     `${filesFolder}/${answersData.title}.pdf`
   );
   docPDF.pipe(writeStream);
   //add the images into the pdf
-  await readdirAsync(croppedFolder).then(async files => {
-    const imgFiles = files.filter(file => file.includes(`.${IMG_FORMAT}`));
+  await readdirAsync(croppedFolder).then(async (files) => {
+    const imgFiles = files.filter((file) => file.includes(`.${IMG_FORMAT}`));
     for (const file of imgFiles) {
       const image = docPDF.openImage(`${croppedFolder}/${file}`);
       docPDF.addPage({ size: [image.width, image.height] });
@@ -140,9 +140,9 @@ async function createImgsFromPDF() {
   const createImgsBar = new _cliProgress.SingleBar({
     format: `Creating ${IMG_FORMAT}s from PDFs | ${_colors.yellow(
       "{bar}"
-    )} | {percentage}% || {value} of {total} pdfs`
+    )} | {percentage}% || {value} of {total} pdfs`,
   });
-  await readdirAsync(tmpFolder).then(async files => {
+  await readdirAsync(tmpFolder).then(async (files) => {
     createImgsBar.start(files.length, 0);
     for (const file of files) {
       const newFileName = file.replace(".pdf", "");
@@ -151,7 +151,7 @@ async function createImgsFromPDF() {
         savename: newFileName,
         savedir: tmpFolder, // output file location
         format: IMG_FORMAT, // output file format
-        size: `${IMG_WIDTH}x${IMG_HEIGHT}`
+        size: `${IMG_WIDTH}x${IMG_HEIGHT}`,
       });
 
       file.includes("pdf") &&
@@ -160,7 +160,7 @@ async function createImgsFromPDF() {
           fs.rename(
             `${tmpFolder}/${newFileName}_1.${IMG_FORMAT}`,
             `${tmpFolder}/${newFileName}.${IMG_FORMAT}`,
-            err => {
+            (err) => {
               if (err) throw err;
             }
           );
@@ -173,10 +173,28 @@ async function createImgsFromPDF() {
 
 //create Temporary folder for all file manipulation
 async function createTmpFolder() {
-  return fs.mkdir(tmpFolder, { recursive: true }, err => {
+  return fs.mkdir(tmpFolder, { recursive: true }, (err) => {
     if (err) throw err;
     console.log("Created temp folder", "\n");
   });
+}
+
+async function runAgain() {
+  await inquirer
+    .prompt([
+      {
+        type: "confirm",
+        message: "Run again?",
+        name: "run-again",
+      },
+    ])
+    .then(async (confirm) => {
+      if (confirm["run-again"]) {
+        start();
+      } else {
+        process.exit(0);
+      }
+    });
 }
 
 //delete Temporary folder for all file manipulation
@@ -193,15 +211,16 @@ async function delTmpFolder() {
 
 //rename original files or folders and remove spaces
 async function renameFilesFolders() {
-  await readdirAsync(filesFolder).then(async files => {
+  await readdirAsync(filesFolder).then(async (files) => {
     for (const file of files) {
-      fs.rename(
-        `${filesFolder}/${file}`,
-        `${filesFolder}/${file.split(" ").join("-")}`,
-        err => {
-          if (err) throw err;
-        }
-      );
+      file.indexOf("pdf") == -1 && //dont rename if it is pdf
+        fs.rename(
+          `${filesFolder}/${file}`,
+          `${filesFolder}/${file.split(" ").join("-")}`,
+          (err) => {
+            if (err) throw err;
+          }
+        );
     }
   });
 }
@@ -209,7 +228,7 @@ async function renameFilesFolders() {
 //unzip / unrar archives to pdfs
 async function extractArchives(data) {
   const { stdout, stderr } = await exec(
-    `unrar e ${filesFolder}/${data.extract} ${tmpFolder} -idq`
+    `rar e ${filesFolder}/${data.extract} ${tmpFolder} -idq`
   );
 
   if (stderr) {
@@ -236,19 +255,23 @@ async function promptUser() {
   let archivesChoices;
   let foldersChoices;
   let extractChoices;
-  await readdirAsync(filesFolder, { withFileTypes: true }).then(async files => {
-    archivesChoices = [
-      ...files.filter(
-        file =>
-          (file.isFile() && file.name.includes(".rar")) ||
-          file.name.includes(".zip")
-      )
-    ];
-    foldersChoices = [
-      ...files.filter(file => file.isDirectory()).map(dirent => dirent.name)
-    ];
-    extractChoices = [...archivesChoices, ...foldersChoices];
-  });
+  await readdirAsync(filesFolder, { withFileTypes: true }).then(
+    async (files) => {
+      archivesChoices = [
+        ...files.filter(
+          (file) =>
+            (file.isFile() && file.name.includes(".rar")) ||
+            file.name.includes(".zip")
+        ),
+      ];
+      foldersChoices = [
+        ...files
+          .filter((file) => file.isDirectory())
+          .map((dirent) => dirent.name),
+      ];
+      extractChoices = [...archivesChoices, ...foldersChoices];
+    }
+  );
 
   //prompt the first question
   await inquirer
@@ -257,10 +280,10 @@ async function promptUser() {
         type: "rawlist",
         message: "Create a VR PDF from?",
         name: "extract",
-        choices: extractChoices
-      }
+        choices: extractChoices,
+      },
     ])
-    .then(async answers => {
+    .then(async (answers) => {
       Object.assign(answersData, answers);
       //quickly check if we selected a folder or a archive (zip / rar)
       let isArchive;
@@ -275,10 +298,10 @@ async function promptUser() {
           {
             type: "input",
             message: "What should be the title of the PDF?",
-            name: "title"
-          }
+            name: "title",
+          },
         ])
-        .then(async answers => Object.assign(answersData, answers));
+        .then(async (answers) => Object.assign(answersData, answers));
     });
 }
 
@@ -295,6 +318,7 @@ async function start() {
   await createCroppedImages();
   await createPDF();
   await delTmpFolder();
+  await runAgain();
 }
 
 start();
